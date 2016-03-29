@@ -24,6 +24,7 @@
  */
 
 #import "PushPlugin.h"
+#define SYSTEM_VERSION_LESS_THAN(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedAscending)
 
 @implementation PushPlugin
 
@@ -33,6 +34,7 @@
 @synthesize callbackId;
 @synthesize notificationCallbackId;
 @synthesize callback;
+
 
 
 - (void)unregister:(CDVInvokedUrlCommand*)command;
@@ -46,7 +48,8 @@
 - (void)register:(CDVInvokedUrlCommand*)command;
 {
 	self.callbackId = command.callbackId;
-
+    self.notificationCallbackId = command.callbackId;
+    
     NSMutableDictionary* options = [command.arguments objectAtIndex:0];
 
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 80000
@@ -156,8 +159,12 @@
         [results setValue:[[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"] forKey:@"appVersion"];
 
         // Check what Notifications the user has turned on.  We registered for all three, but they may have manually disabled some or all of them.
-        NSUInteger rntypes = [[UIApplication sharedApplication] enabledRemoteNotificationTypes];
-
+        NSUInteger rntypes;
+        if (!SYSTEM_VERSION_LESS_THAN(@"8.0")) {
+            rntypes = [[[UIApplication sharedApplication] currentUserNotificationSettings] types];
+        }else{
+            rntypes = [[UIApplication sharedApplication] enabledRemoteNotificationTypes];
+        }
         // Set the defaults to disabled unless we find otherwise...
         NSString *pushBadge = @"disabled";
         NSString *pushAlert = @"disabled";
@@ -201,25 +208,13 @@
 
     if (notificationMessage && self.callback)
     {
-        NSMutableString *jsonStr = [NSMutableString stringWithString:@"{"];
-
-        [self parseDictionary:notificationMessage intoJSON:jsonStr];
-
-        if (isInline)
-        {
-            [jsonStr appendFormat:@"foreground:\"%d\"", 1];
-            isInline = NO;
-        }
-		else
-            [jsonStr appendFormat:@"foreground:\"%d\"", 0];
-
-        [jsonStr appendString:@"}"];
-
-        NSLog(@"Msg: %@", jsonStr);
-
-        NSString * jsCallBack = [NSString stringWithFormat:@"%@(%@);", self.callback, jsonStr];
-        [self.webView stringByEvaluatingJavaScriptFromString:jsCallBack];
-
+        NSDictionary *jDict = @{
+                @"method_name":self.callback,
+                @"method_params":self.notificationMessage
+        };
+        CDVPluginResult *commandResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:jDict];
+        [commandResult setKeepCallbackAsBool:YES];
+        [self.commandDelegate sendPluginResult:commandResult callbackId:self.callbackId];
         self.notificationMessage = nil;
     }
 }
@@ -252,7 +247,7 @@
 - (void)setApplicationIconBadgeNumber:(CDVInvokedUrlCommand *)command {
 
     self.callbackId = command.callbackId;
-
+    self.notificationCallbackId = command.callbackId;
     NSMutableDictionary* options = [command.arguments objectAtIndex:0];
     int badge = [[options objectForKey:@"badge"] intValue] ?: 0;
 
@@ -265,6 +260,7 @@
     if (self.callbackId != nil)
     {
         CDVPluginResult *commandResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:message];
+        [commandResult setKeepCallbackAsBool:YES];
         [self.commandDelegate sendPluginResult:commandResult callbackId:self.callbackId];
     }
 }
@@ -273,7 +269,7 @@
 {
     NSString        *errorMessage = (error) ? [NSString stringWithFormat:@"%@ - %@", message, [error localizedDescription]] : message;
     CDVPluginResult *commandResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMessage];
-
+    [commandResult setKeepCallbackAsBool:YES];
     [self.commandDelegate sendPluginResult:commandResult callbackId:self.callbackId];
 }
 
